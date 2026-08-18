@@ -258,7 +258,7 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// treated as having no deadline.
     ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed.
+    /// known to have elapsed without the condition being met.
     ///
     /// Like `wait`, the lock specified will be re-acquired when this function
     /// returns, regardless of whether the timeout elapsed or not.
@@ -360,14 +360,18 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     {
         let mut result = WaitTimeoutResult(false);
 
-        while !result.timed_out() && condition(mutex_guard.deref_mut()) {
+        loop {
+            if !condition(mutex_guard.deref_mut()) {
+                return WaitTimeoutResult(false);
+            }
+            if result.timed_out() {
+                return result;
+            }
             result = WaitTimeoutResult(unsafe {
                 self.inner
                     .wait_until(MutexGuard::mutex(mutex_guard).raw(), &timeout)
             });
         }
-
-        result
     }
 
     /// Waits on this condition variable for a notification, timing out after a
@@ -390,7 +394,7 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// treated as having no deadline.
     ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed.
+    /// known to have elapsed without the condition being met.
     ///
     /// Like `wait`, the lock specified will be re-acquired when this function
     /// returns, regardless of whether the timeout elapsed or not.
