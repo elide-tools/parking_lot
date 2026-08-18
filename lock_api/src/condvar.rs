@@ -254,6 +254,9 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// measured with a monotonic clock, and not affected by the changes made to
     /// the system time.
     ///
+    /// A timeout which cannot be represented by the underlying clock is
+    /// treated as having no deadline.
+    ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
     /// known to have elapsed.
     ///
@@ -288,6 +291,9 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
     /// the system time.
+    ///
+    /// A timeout which cannot be represented by the underlying clock is
+    /// treated as having no deadline.
     ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
     /// known to have elapsed.
@@ -327,6 +333,9 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
     /// the system time.
+    ///
+    /// A timeout which cannot be represented by the underlying clock is
+    /// treated as having no deadline.
     ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
     /// known to have elapsed.
@@ -376,6 +385,9 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
     /// the system time.
+    ///
+    /// A timeout which cannot be represented by the underlying clock is
+    /// treated as having no deadline.
     ///
     /// The returned `WaitTimeoutResult` value indicates if the timeout is
     /// known to have elapsed.

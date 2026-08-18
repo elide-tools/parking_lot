@@ -184,12 +184,16 @@ impl<R: RawMutexFair, G: GetThreadId> RawReentrantMutex<R, G> {
 
 impl<R: RawMutexTimed, G: GetThreadId> RawReentrantMutex<R, G> {
     /// Attempts to acquire this lock until a timeout is reached.
+    ///
+    /// See [`RawMutexTimed::try_lock_until`] for timeout behavior.
     #[inline]
     pub fn try_lock_until(&self, timeout: R::Instant) -> bool {
         self.lock_internal(|| self.mutex.try_lock_until(timeout))
     }
 
     /// Attempts to acquire this lock until a timeout is reached.
+    ///
+    /// See [`RawMutexTimed::try_lock_for`] for timeout behavior.
     #[inline]
     pub fn try_lock_for(&self, timeout: R::Duration) -> bool {
         self.lock_internal(|| self.mutex.try_lock_for(timeout))
@@ -476,6 +480,10 @@ impl<R: RawMutexTimed, G: GetThreadId, T: ?Sized> ReentrantMutex<R, G, T> {
     /// If the lock could not be acquired before the timeout expired, then
     /// `None` is returned. Otherwise, an RAII guard is returned. The lock will
     /// be unlocked when the guard is dropped.
+    ///
+    /// This method may return after the timeout due to scheduling or
+    /// platform-specific behavior. A timeout which cannot be represented by
+    /// the underlying clock is treated as having no deadline.
     #[inline]
     #[track_caller]
     pub fn try_lock_for(&self, timeout: R::Duration) -> Option<ReentrantMutexGuard<'_, R, G, T>> {
@@ -492,6 +500,10 @@ impl<R: RawMutexTimed, G: GetThreadId, T: ?Sized> ReentrantMutex<R, G, T> {
     /// If the lock could not be acquired before the timeout expired, then
     /// `None` is returned. Otherwise, an RAII guard is returned. The lock will
     /// be unlocked when the guard is dropped.
+    ///
+    /// This method may return after the timeout due to scheduling or
+    /// platform-specific behavior. A timeout which cannot be represented by
+    /// the underlying clock is treated as having no deadline.
     #[inline]
     #[track_caller]
     pub fn try_lock_until(&self, timeout: R::Instant) -> Option<ReentrantMutexGuard<'_, R, G, T>> {
