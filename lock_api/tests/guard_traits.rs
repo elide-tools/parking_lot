@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 #[cfg(feature = "atomic_usize")]
 use std::num::NonZeroUsize;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 #[cfg(all(feature = "arc_lock", feature = "atomic_usize"))]
 use lock_api::ArcReentrantMutexGuard;
@@ -37,33 +37,37 @@ assert_impl_all!(GuardSend: Send, Sync);
 assert_impl_all!(GuardNoSend: Sync);
 assert_not_impl_any!(GuardNoSend: Send);
 
+const SHARED: u8 = 1;
+const EXCLUSIVE: u8 = 2;
+const UPGRADABLE: u8 = 3;
+
 struct TestRaw<T, M> {
-    locked: AtomicBool,
+    state: AtomicU8,
     traits: PhantomData<T>,
     marker: PhantomData<fn() -> M>,
 }
 
 impl<T, M> TestRaw<T, M> {
-    fn lock(&self) {
-        while !self.try_lock() {
+    fn lock(&self, state: u8) {
+        while !self.try_lock(state) {
             std::hint::spin_loop();
         }
     }
 
-    fn try_lock(&self) -> bool {
-        self.locked
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+    fn try_lock(&self, state: u8) -> bool {
+        self.state
+            .compare_exchange(0, state, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
     }
 
     unsafe fn unlock(&self) {
-        self.locked.store(false, Ordering::Release);
+        self.state.store(0, Ordering::Release);
     }
 }
 
 unsafe impl<T, M> RawMutex for TestRaw<T, M> {
     const INIT: Self = Self {
-        locked: AtomicBool::new(false),
+        state: AtomicU8::new(0),
         traits: PhantomData,
         marker: PhantomData,
     };
@@ -71,21 +75,25 @@ unsafe impl<T, M> RawMutex for TestRaw<T, M> {
     type GuardMarker = M;
 
     fn lock(&self) {
-        TestRaw::lock(self);
+        TestRaw::lock(self, EXCLUSIVE);
     }
 
     fn try_lock(&self) -> bool {
-        TestRaw::try_lock(self)
+        TestRaw::try_lock(self, EXCLUSIVE)
     }
 
     unsafe fn unlock(&self) {
         unsafe { TestRaw::unlock(self) };
     }
+
+    fn is_locked(&self) -> bool {
+        self.state.load(Ordering::Relaxed) != 0
+    }
 }
 
 unsafe impl<T, M> RawRwLock for TestRaw<T, M> {
     const INIT: Self = Self {
-        locked: AtomicBool::new(false),
+        state: AtomicU8::new(0),
         traits: PhantomData,
         marker: PhantomData,
     };
@@ -93,11 +101,11 @@ unsafe impl<T, M> RawRwLock for TestRaw<T, M> {
     type GuardMarker = M;
 
     fn lock_shared(&self) {
-        TestRaw::lock(self);
+        TestRaw::lock(self, SHARED);
     }
 
     fn try_lock_shared(&self) -> bool {
-        TestRaw::try_lock(self)
+        TestRaw::try_lock(self, SHARED)
     }
 
     unsafe fn unlock_shared(&self) {
@@ -105,34 +113,45 @@ unsafe impl<T, M> RawRwLock for TestRaw<T, M> {
     }
 
     fn lock_exclusive(&self) {
-        TestRaw::lock(self);
+        TestRaw::lock(self, EXCLUSIVE);
     }
 
     fn try_lock_exclusive(&self) -> bool {
-        TestRaw::try_lock(self)
+        TestRaw::try_lock(self, EXCLUSIVE)
     }
 
     unsafe fn unlock_exclusive(&self) {
         unsafe { TestRaw::unlock(self) };
     }
+
+    fn is_locked(&self) -> bool {
+        self.state.load(Ordering::Relaxed) != 0
+    }
+
+    fn is_locked_exclusive(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == EXCLUSIVE
+    }
 }
 
 unsafe impl<T, M> RawRwLockUpgrade for TestRaw<T, M> {
     fn lock_upgradable(&self) {
-        TestRaw::lock(self);
+        TestRaw::lock(self, UPGRADABLE);
     }
 
     fn try_lock_upgradable(&self) -> bool {
-        TestRaw::try_lock(self)
+        TestRaw::try_lock(self, UPGRADABLE)
     }
 
     unsafe fn unlock_upgradable(&self) {
         unsafe { TestRaw::unlock(self) };
     }
 
-    unsafe fn upgrade(&self) {}
+    unsafe fn upgrade(&self) {
+        self.state.store(EXCLUSIVE, Ordering::Relaxed);
+    }
 
     unsafe fn try_upgrade(&self) -> bool {
+        self.state.store(EXCLUSIVE, Ordering::Relaxed);
         true
     }
 }
