@@ -44,12 +44,19 @@ const TOKEN_EXCLUSIVE: ParkToken = ParkToken(WRITER_BIT);
 const TOKEN_UPGRADABLE: ParkToken = ParkToken(ONE_READER | UPGRADABLE_BIT);
 
 /// Raw reader-writer lock type backed by the parking lot.
-pub struct RawRwLock {
+///
+/// If `RECURSIVE` is `true`, readers are prioritized over writers: acquiring a
+/// read lock is guaranteed not to block unless a writer currently holds the
+/// lock. This permits recursive read locking, but may starve writers.
+pub struct RawRwLock<const RECURSIVE: bool = false> {
     state: AtomicUsize,
 }
 
-unsafe impl lock_api::RawRwLock for RawRwLock {
-    const INIT: RawRwLock = RawRwLock {
+/// Raw reader-writer lock which permits recursive read locking.
+pub type RawRwLockRecursive = RawRwLock<true>;
+
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLock for RawRwLock<RECURSIVE> {
+    const INIT: Self = Self {
         state: AtomicUsize::new(0),
     };
 
@@ -97,8 +104,8 @@ unsafe impl lock_api::RawRwLock for RawRwLock {
 
     #[inline]
     fn lock_shared(&self) {
-        if !self.try_lock_shared_fast(false) {
-            let result = self.lock_shared_slow(false, None);
+        if !self.try_lock_shared_fast() {
+            let result = self.lock_shared_slow(None);
             debug_assert!(result);
         }
         self.deadlock_acquire();
@@ -106,10 +113,10 @@ unsafe impl lock_api::RawRwLock for RawRwLock {
 
     #[inline]
     fn try_lock_shared(&self) -> bool {
-        let result = if self.try_lock_shared_fast(false) {
+        let result = if self.try_lock_shared_fast() {
             true
         } else {
-            self.try_lock_shared_slow(false)
+            self.try_lock_shared_slow()
         };
         if result {
             self.deadlock_acquire();
@@ -139,7 +146,7 @@ unsafe impl lock_api::RawRwLock for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockFair for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockFair for RawRwLock<RECURSIVE> {
     #[inline]
     unsafe fn unlock_shared_fair(&self) {
         // Shared unlocking is always fair in this implementation.
@@ -161,7 +168,8 @@ unsafe impl lock_api::RawRwLockFair for RawRwLock {
 
     #[inline]
     unsafe fn bump_shared(&self) {
-        if self.state.load(Ordering::Relaxed) & WRITER_BIT != 0 {
+        let state = self.state.load(Ordering::Relaxed);
+        if state & WRITER_BIT != 0 && (!RECURSIVE || state & READERS_MASK == ONE_READER) {
             unsafe { self.bump_shared_slow() };
         }
     }
@@ -174,7 +182,7 @@ unsafe impl lock_api::RawRwLockFair for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockDowngrade for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockDowngrade for RawRwLock<RECURSIVE> {
     #[inline]
     unsafe fn downgrade(&self) {
         let state = self
@@ -188,16 +196,16 @@ unsafe impl lock_api::RawRwLockDowngrade for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockTimed for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockTimed for RawRwLock<RECURSIVE> {
     type Duration = Duration;
     type Instant = Instant;
 
     #[inline]
     fn try_lock_shared_for(&self, timeout: Self::Duration) -> bool {
-        let result = if self.try_lock_shared_fast(false) {
+        let result = if self.try_lock_shared_fast() {
             true
         } else {
-            self.lock_shared_slow(false, util::to_deadline(timeout))
+            self.lock_shared_slow(util::to_deadline(timeout))
         };
         if result {
             self.deadlock_acquire();
@@ -207,10 +215,10 @@ unsafe impl lock_api::RawRwLockTimed for RawRwLock {
 
     #[inline]
     fn try_lock_shared_until(&self, timeout: Self::Instant) -> bool {
-        let result = if self.try_lock_shared_fast(false) {
+        let result = if self.try_lock_shared_fast() {
             true
         } else {
-            self.lock_shared_slow(false, Some(timeout))
+            self.lock_shared_slow(Some(timeout))
         };
         if result {
             self.deadlock_acquire();
@@ -253,59 +261,7 @@ unsafe impl lock_api::RawRwLockTimed for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockRecursive for RawRwLock {
-    #[inline]
-    fn lock_shared_recursive(&self) {
-        if !self.try_lock_shared_fast(true) {
-            let result = self.lock_shared_slow(true, None);
-            debug_assert!(result);
-        }
-        self.deadlock_acquire();
-    }
-
-    #[inline]
-    fn try_lock_shared_recursive(&self) -> bool {
-        let result = if self.try_lock_shared_fast(true) {
-            true
-        } else {
-            self.try_lock_shared_slow(true)
-        };
-        if result {
-            self.deadlock_acquire();
-        }
-        result
-    }
-}
-
-unsafe impl lock_api::RawRwLockRecursiveTimed for RawRwLock {
-    #[inline]
-    fn try_lock_shared_recursive_for(&self, timeout: Self::Duration) -> bool {
-        let result = if self.try_lock_shared_fast(true) {
-            true
-        } else {
-            self.lock_shared_slow(true, util::to_deadline(timeout))
-        };
-        if result {
-            self.deadlock_acquire();
-        }
-        result
-    }
-
-    #[inline]
-    fn try_lock_shared_recursive_until(&self, timeout: Self::Instant) -> bool {
-        let result = if self.try_lock_shared_fast(true) {
-            true
-        } else {
-            self.lock_shared_slow(true, Some(timeout))
-        };
-        if result {
-            self.deadlock_acquire();
-        }
-        result
-    }
-}
-
-unsafe impl lock_api::RawRwLockUpgrade for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockUpgrade for RawRwLock<RECURSIVE> {
     #[inline]
     fn lock_upgradable(&self) {
         if !self.try_lock_upgradable_fast() {
@@ -381,7 +337,7 @@ unsafe impl lock_api::RawRwLockUpgrade for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockUpgradeFair for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockUpgradeFair for RawRwLock<RECURSIVE> {
     #[inline]
     unsafe fn unlock_upgradable_fair(&self) {
         self.deadlock_release();
@@ -412,7 +368,7 @@ unsafe impl lock_api::RawRwLockUpgradeFair for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockUpgradeDowngrade for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockUpgradeDowngrade for RawRwLock<RECURSIVE> {
     #[inline]
     unsafe fn downgrade_upgradable(&self) {
         let state = self.state.fetch_sub(UPGRADABLE_BIT, Ordering::Relaxed);
@@ -437,7 +393,7 @@ unsafe impl lock_api::RawRwLockUpgradeDowngrade for RawRwLock {
     }
 }
 
-unsafe impl lock_api::RawRwLockUpgradeTimed for RawRwLock {
+unsafe impl<const RECURSIVE: bool> lock_api::RawRwLockUpgradeTimed for RawRwLock<RECURSIVE> {
     #[inline]
     fn try_lock_upgradable_until(&self, timeout: Instant) -> bool {
         let result = if self.try_lock_upgradable_fast() {
@@ -491,20 +447,15 @@ unsafe impl lock_api::RawRwLockUpgradeTimed for RawRwLock {
     }
 }
 
-impl RawRwLock {
+impl<const RECURSIVE: bool> RawRwLock<RECURSIVE> {
     #[inline(always)]
-    fn try_lock_shared_fast(&self, recursive: bool) -> bool {
+    fn try_lock_shared_fast(&self) -> bool {
         let state = self.state.load(Ordering::Relaxed);
 
-        // We can't allow grabbing a shared lock if there is a writer, even if
-        // the writer is still waiting for the remaining readers to exit.
-        if state & WRITER_BIT != 0 {
-            // To allow recursive locks, we make an exception and allow readers
-            // to skip ahead of a pending writer to avoid deadlocking, at the
-            // cost of breaking the fairness guarantees.
-            if !recursive || state & READERS_MASK == 0 {
-                return false;
-            }
+        // Recursive readers may skip ahead of a pending writer while another
+        // reader still holds the lock.
+        if state & WRITER_BIT != 0 && (!RECURSIVE || state & READERS_MASK == 0) {
+            return false;
         }
 
         if let Some(new_state) = state.checked_add(ONE_READER) {
@@ -517,15 +468,11 @@ impl RawRwLock {
     }
 
     #[cold]
-    fn try_lock_shared_slow(&self, recursive: bool) -> bool {
+    fn try_lock_shared_slow(&self) -> bool {
         let mut state = self.state.load(Ordering::Relaxed);
         loop {
-            // This mirrors the condition in try_lock_shared_fast
-            #[allow(clippy::collapsible_if)]
-            if state & WRITER_BIT != 0 {
-                if !recursive || state & READERS_MASK == 0 {
-                    return false;
-                }
+            if state & WRITER_BIT != 0 && (!RECURSIVE || state & READERS_MASK == 0) {
+                return false;
             }
             match self.state.compare_exchange_weak(
                 state,
@@ -648,16 +595,12 @@ impl RawRwLock {
     }
 
     #[cold]
-    fn lock_shared_slow(&self, recursive: bool, timeout: Option<Instant>) -> bool {
+    fn lock_shared_slow(&self, timeout: Option<Instant>) -> bool {
         let try_lock = |state: &mut usize| {
             let mut spinwait_shared = SpinWait::new();
             loop {
-                // This is the same condition as try_lock_shared_fast
-                #[allow(clippy::collapsible_if)]
-                if *state & WRITER_BIT != 0 {
-                    if !recursive || *state & READERS_MASK == 0 {
-                        return false;
-                    }
+                if *state & WRITER_BIT != 0 && (!RECURSIVE || *state & READERS_MASK == 0) {
+                    return false;
                 }
 
                 if self
@@ -914,13 +857,16 @@ impl RawRwLock {
         let filter = |ParkToken(token)| {
             let s = new_state.get();
 
-            // If we are waking up a writer, don't wake anything else.
-            if s & WRITER_BIT != 0 {
+            // Normal rwlocks stop after selecting a writer. Recursive rwlocks
+            // must continue scanning for readers that may be needed for
+            // forward progress.
+            if !RECURSIVE && s & WRITER_BIT != 0 {
                 return FilterOp::Stop;
             }
 
             // Otherwise wake *all* readers and one upgrader/writer.
-            if token & (UPGRADABLE_BIT | WRITER_BIT) != 0 && s & UPGRADABLE_BIT != 0 {
+            if token & (UPGRADABLE_BIT | WRITER_BIT) != 0 && s & (UPGRADABLE_BIT | WRITER_BIT) != 0
+            {
                 // Skip writers and upgradable readers if we already have
                 // a writer/upgradable reader.
                 FilterOp::Skip
@@ -1118,5 +1064,10 @@ impl RawRwLock {
     fn deadlock_release(&self) {
         unsafe { deadlock::release_resource(core::ptr::from_ref(self).addr()) };
         unsafe { deadlock::release_resource(core::ptr::from_ref(self).addr() + 1) };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_parked_threads(&self) -> bool {
+        self.state.load(Ordering::Relaxed) & (PARKED_BIT | WRITER_PARKED_BIT) != 0
     }
 }

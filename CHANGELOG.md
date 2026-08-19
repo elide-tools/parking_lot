@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APIs.
 - Removed the `hardware-lock-elision` feature.
 - Removed the no-op `lock_api/nightly` feature.
+- Replaced the recursive read methods on `RwLock` with a dedicated reader-biased
+  `RecursiveRwLock` type. The `RawRwLockRecursive` and `RawRwLockRecursiveTimed`
+  extension traits have been removed from `lock_api`.
 - Added `Once::new_completed` for constructing a `Once` in the completed state.
 - Added `into_inner_with_raw` to `lock_api`'s `Mutex`, `RwLock`, and `ReentrantMutex`.
 - Corrected the `Send` and `Sync` bounds of lock guards in `lock_api`.
