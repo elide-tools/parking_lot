@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated dependencies and replaced compatibility shims with newly stabilized standard-library
   APIs.
 - Removed the `hardware-lock-elision` feature.
+- Removed automatic eventual fairness. Fair unlocking remains available through
+  the explicit fair-unlock APIs.
 - Removed the no-op `lock_api/nightly` feature.
 - Removed the legacy `lock_api` `const_new` methods and the redundant
   `parking_lot` `const_*` constructor functions; the corresponding `new`
