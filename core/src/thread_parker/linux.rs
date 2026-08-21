@@ -5,14 +5,41 @@ use core::{
 use std::thread;
 use std::time::Instant;
 
-// x32 Linux uses a non-standard type for tv_nsec in timespec.
-// See https://sourceware.org/bugzilla/show_bug.cgi?id=16437
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "32"))]
-#[allow(non_camel_case_types)]
-type tv_nsec_t = i64;
-#[cfg(not(all(target_arch = "x86_64", target_pointer_width = "32")))]
-#[allow(non_camel_case_types)]
-type tv_nsec_t = libc::c_long;
+// The futex timeout uses the kernel syscall ABI, which may differ from libc's
+// `timespec` ABI. Native 64-bit, x32 and futex_time64 syscalls use 64-bit
+// storage slots. On compat ABIs only the low 32 bits of the tv_nsec slot are
+// significant; storing it as i64 also zeros the padding. Legacy 32-bit futex
+// syscalls use two 32-bit fields.
+cfg_select! {
+    any(target_arch = "hexagon", target_arch = "riscv32") => {
+        // SYS_futex_time64 is part of the architecture-independent Linux
+        // syscall ABI, but libc does not expose the constant on all time64-only
+        // architectures.
+        const SYS_FUTEX: libc::c_long = 422;
+        type TimespecField = i64;
+    }
+    target_arch = "m68k" => {
+        // libc aliases SYS_futex to SYS_futex_time64 on m68k, but the time32
+        // syscall works on older kernels and is sufficient for our relative
+        // timeouts.
+        const SYS_FUTEX: libc::c_long = libc::SYS_futex_time32;
+        type TimespecField = i32;
+    }
+    any(target_pointer_width = "64", target_arch = "x86_64") => {
+        const SYS_FUTEX: libc::c_long = libc::SYS_futex as libc::c_long;
+        type TimespecField = i64;
+    }
+    _ => {
+        const SYS_FUTEX: libc::c_long = libc::SYS_futex as libc::c_long;
+        type TimespecField = i32;
+    }
+}
+
+#[repr(C)]
+struct Timespec {
+    tv_sec: TimespecField,
+    tv_nsec: TimespecField,
+}
 
 fn errno() -> libc::c_int {
     #[cfg(target_os = "linux")]
@@ -67,10 +94,11 @@ impl super::ThreadParkerT for ThreadParker {
                 return false;
             }
             let diff = timeout - now;
-            // SAFETY: libc::timespec is zero initializable.
-            let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
-            ts.tv_sec = libc::time_t::try_from(diff.as_secs()).unwrap_or(libc::time_t::MAX);
-            ts.tv_nsec = diff.subsec_nanos() as tv_nsec_t;
+            let ts = Timespec {
+                tv_sec: TimespecField::try_from(diff.as_secs()).unwrap_or(TimespecField::MAX),
+                tv_nsec: diff.subsec_nanos() as TimespecField,
+            };
+
             self.futex_wait(Some(ts));
         }
         true
@@ -92,14 +120,14 @@ impl super::ThreadParkerT for ThreadParker {
 
 impl ThreadParker {
     #[inline]
-    fn futex_wait(&self, ts: Option<libc::timespec>) {
+    fn futex_wait(&self, ts: Option<Timespec>) {
         let ts_ptr = ts
             .as_ref()
             .map(|ts_ref| ts_ref as *const _)
             .unwrap_or(ptr::null());
         let r = unsafe {
             libc::syscall(
-                libc::SYS_futex,
+                SYS_FUTEX,
                 &self.futex,
                 libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
                 1,
@@ -128,7 +156,7 @@ impl super::UnparkHandleT for UnparkHandle {
         // matter since the syscall will just return EFAULT in that case.
         let r = unsafe {
             libc::syscall(
-                libc::SYS_futex,
+                SYS_FUTEX,
                 self.futex.as_ptr(),
                 libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG,
                 1,
