@@ -79,7 +79,7 @@ unsafe impl<T, M> RawMutex for TestRaw<T, M> {
     }
 
     unsafe fn unlock(&self) {
-        TestRaw::unlock(self);
+        unsafe { TestRaw::unlock(self) };
     }
 }
 
@@ -101,7 +101,7 @@ unsafe impl<T, M> RawRwLock for TestRaw<T, M> {
     }
 
     unsafe fn unlock_shared(&self) {
-        TestRaw::unlock(self);
+        unsafe { TestRaw::unlock(self) };
     }
 
     fn lock_exclusive(&self) {
@@ -113,7 +113,7 @@ unsafe impl<T, M> RawRwLock for TestRaw<T, M> {
     }
 
     unsafe fn unlock_exclusive(&self) {
-        TestRaw::unlock(self);
+        unsafe { TestRaw::unlock(self) };
     }
 }
 
@@ -127,7 +127,7 @@ unsafe impl<T, M> RawRwLockUpgrade for TestRaw<T, M> {
     }
 
     unsafe fn unlock_upgradable(&self) {
-        TestRaw::unlock(self);
+        unsafe { TestRaw::unlock(self) };
     }
 
     unsafe fn upgrade(&self) {}
