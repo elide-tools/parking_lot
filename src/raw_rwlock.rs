@@ -1038,6 +1038,8 @@ impl<const RECURSIVE: bool> RawRwLock<RECURSIVE> {
 
     #[inline]
     fn deadlock_acquire(&self) {
+        // Waiters can block on either of this lock's two queue keys, so record
+        // both as owned by the current thread.
         unsafe { deadlock::acquire_resource(core::ptr::from_ref(self).addr()) };
         unsafe { deadlock::acquire_resource(core::ptr::from_ref(self).addr() + 1) };
     }

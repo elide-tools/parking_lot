@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the futex timeout ABI on 32-bit Linux targets, including time64-only
   architectures.
 - Fixed `WordLock` queue-unlock retry bookkeeping.
+- Fixed synchronization and lifetime hazards in the experimental deadlock
+  detector's resource tracking and backtrace collection.
+- Added `Once` deadlock tracking and made overlapping wait cycles report as a
+  single component.
 
 ## `parking_lot` - [0.12.5](https://github.com/Amanieu/parking_lot/compare/parking_lot-v0.12.4...parking_lot-v0.12.5) - 2025-09-30
 

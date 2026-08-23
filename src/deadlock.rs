@@ -3,6 +3,11 @@
 //! This feature is optional and can be enabled with the `deadlock_detection`
 //! Cargo feature.
 //!
+//! Reporting is destructive: detected threads are removed from their parking
+//! queues, capture their backtraces, and then remain blocked permanently.
+//! Waits with a deadline are not reported because they can resolve by timing
+//! out.
+//!
 //! # Example
 //!
 //! ```
@@ -21,7 +26,7 @@
 //!             continue;
 //!         }
 //!
-//!         println!("{} deadlock cycles detected", deadlocks.len());
+//!         println!("{} deadlocks detected", deadlocks.len());
 //!         for (i, threads) in deadlocks.iter().enumerate() {
 //!             println!("Deadlock #{}", i);
 //!             for t in threads {
@@ -41,12 +46,13 @@ pub(crate) use parking_lot_core::deadlock::{acquire_resource, release_resource};
 #[cfg(test)]
 #[cfg(feature = "deadlock_detection")]
 mod tests {
-    use crate::{Mutex, ReentrantMutex, RwLock};
+    use crate::{Mutex, Once, ReentrantMutex, RwLock};
     use std::sync::{Arc, Barrier};
     use std::thread::{self, sleep};
     use std::time::Duration;
 
-    // We need to serialize these tests since deadlock detection uses global state
+    // Serialize these tests with each other because deadlock detection scans
+    // and mutates process-global parking queues.
     static DEADLOCK_DETECTION_LOCK: Mutex<()> = Mutex::new(());
 
     fn check_deadlock() -> bool {
@@ -115,6 +121,36 @@ mod tests {
         sleep(Duration::from_millis(50));
         assert!(check_deadlock());
 
+        assert!(!check_deadlock());
+    }
+
+    #[test]
+    fn test_once_deadlock() {
+        let _guard = DEADLOCK_DETECTION_LOCK.lock();
+
+        let once = Arc::new(Once::new());
+        let mutex = Arc::new(Mutex::new(()));
+        let barrier = Arc::new(Barrier::new(2));
+
+        let once1 = Arc::clone(&once);
+        let mutex1 = Arc::clone(&mutex);
+        let barrier1 = Arc::clone(&barrier);
+        let _t1 = thread::spawn(move || {
+            once1.call_once(|| {
+                barrier1.wait();
+                let _blocked = mutex1.lock();
+            });
+        });
+
+        let barrier2 = Arc::clone(&barrier);
+        let _t2 = thread::spawn(move || {
+            let _guard = mutex.lock();
+            barrier2.wait();
+            once.call_once(|| unreachable!());
+        });
+
+        sleep(Duration::from_millis(50));
+        assert!(check_deadlock());
         assert!(!check_deadlock());
     }
 
@@ -211,7 +247,6 @@ mod tests {
         assert!(!check_deadlock());
     }
 
-    #[cfg(rwlock_deadlock_detection_not_supported)]
     #[test]
     fn test_rwlock_deadlock_reentrant() {
         let _guard = DEADLOCK_DETECTION_LOCK.lock();
