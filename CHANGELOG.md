@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated dependencies and replaced compatibility shims with newly stabilized standard-library
   APIs.
 - Removed the `hardware-lock-elision` feature.
+- Removed the no-op `lock_api/nightly` feature.
+- Added `Once::new_completed` for constructing a `Once` in the completed state.
+- Added `into_inner_with_raw` to `lock_api`'s `Mutex`, `RwLock`, and `ReentrantMutex`.
+- Corrected the `Send` and `Sync` bounds of lock guards in `lock_api`.
+- Made `RawMutex::is_locked` and `RawRwLock::{is_locked, is_locked_exclusive}` required methods.
+- Renamed `MappedRwLockReadGuard::try_map_or_else` to `try_map_or_err`.
+- Documented the acquire and release requirements of raw lock implementations.
+- Fixed the memory ordering of timed `RwLock` upgrades and upgradable unlocks.
+- Fixed `unlock_upgradable_fair` not forcing a fair handoff.
+- Fixed conditional `Condvar` waits reporting a timeout without rechecking the predicate.
+- Fixed oversized timeout handling across platform backends.
+- Fixed the generic thread parker continuously busy-spinning while parked.
+- Fixed timed waits on ESP-IDF using the wrong clock.
+- Fixed `WordLock` queue-unlock retry bookkeeping.
 
 ## `parking_lot` - [0.12.5](https://github.com/Amanieu/parking_lot/compare/parking_lot-v0.12.4...parking_lot-v0.12.5) - 2025-09-30
 

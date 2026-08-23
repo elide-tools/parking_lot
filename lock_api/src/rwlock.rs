@@ -392,7 +392,7 @@ pub unsafe trait RawRwLockUpgradeTimed: RawRwLockUpgrade + RawRwLockTimed {
 /// required that `T` satisfies `Send` to be shared across threads and `Sync` to
 /// allow concurrent access through readers. The RAII guards returned from the
 /// locking methods implement `Deref` (and `DerefMut` for the `write` methods)
-/// to allow access to the contained of the lock.
+/// to allow access to the contents of the lock.
 pub struct RwLock<R, T: ?Sized> {
     raw: R,
     data: UnsafeCell<T>,
@@ -523,6 +523,11 @@ impl<R: RawRwLock, T: ?Sized> RwLock<R, T> {
     ///
     /// Returns an RAII guard which will release this thread's shared access
     /// once it is dropped.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn read(&self) -> RwLockReadGuard<'_, R, T> {
@@ -538,6 +543,11 @@ impl<R: RawRwLock, T: ?Sized> RwLock<R, T> {
     /// when it is dropped.
     ///
     /// This function does not block.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read(&self) -> Option<RwLockReadGuard<'_, R, T>> {
@@ -710,6 +720,11 @@ impl<R: RawRwLock, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `read` method; however, it requires the `RwLock` to be inside of an `Arc`
     /// and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -723,6 +738,11 @@ impl<R: RawRwLock, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read` method; however, it requires the `RwLock` to be inside of an
     /// `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -810,6 +830,11 @@ impl<R: RawRwLockTimed, T: ?Sized> RwLock<R, T> {
     /// release the shared access when it is dropped.
     ///
     /// See [`RawRwLockTimed::try_lock_shared_for`] for timeout behavior.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read_for(&self, timeout: R::Duration) -> Option<RwLockReadGuard<'_, R, T>> {
@@ -829,6 +854,11 @@ impl<R: RawRwLockTimed, T: ?Sized> RwLock<R, T> {
     /// release the shared access when it is dropped.
     ///
     /// See [`RawRwLockTimed::try_lock_shared_until`] for timeout behavior.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read_until(&self, timeout: R::Instant) -> Option<RwLockReadGuard<'_, R, T>> {
@@ -882,6 +912,11 @@ impl<R: RawRwLockTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read_for` method; however, it requires the `RwLock` to be inside of an
     /// `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -901,6 +936,11 @@ impl<R: RawRwLockTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read_until` method; however, it requires the `RwLock` to be inside of
     /// an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -971,6 +1011,11 @@ impl<R: RawRwLockRecursive, T: ?Sized> RwLock<R, T> {
     ///
     /// Returns an RAII guard which will release this thread's shared access
     /// once it is dropped.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn read_recursive(&self) -> RwLockReadGuard<'_, R, T> {
@@ -989,6 +1034,11 @@ impl<R: RawRwLockRecursive, T: ?Sized> RwLock<R, T> {
     /// time of the call. See the documentation for `read_recursive` for details.
     ///
     /// This function does not block.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read_recursive(&self) -> Option<RwLockReadGuard<'_, R, T>> {
@@ -1004,6 +1054,11 @@ impl<R: RawRwLockRecursive, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `read_recursive` method; however, it requires the `RwLock` to be inside of
     /// an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1017,6 +1072,11 @@ impl<R: RawRwLockRecursive, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read_recursive` method; however, it requires the `RwLock` to be inside
     /// of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1044,6 +1104,11 @@ impl<R: RawRwLockRecursiveTimed, T: ?Sized> RwLock<R, T> {
     /// This method is guaranteed to succeed without blocking if another read
     /// lock is held at the time of the call. See the documentation for
     /// `read_recursive` for details.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read_recursive_for(
@@ -1067,6 +1132,11 @@ impl<R: RawRwLockRecursiveTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// See [`RawRwLockRecursiveTimed::try_lock_shared_recursive_until`] for
     /// timeout behavior.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_read_recursive_until(
@@ -1085,6 +1155,11 @@ impl<R: RawRwLockRecursiveTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read_recursive_for` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1104,6 +1179,11 @@ impl<R: RawRwLockRecursiveTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_read_recursive_until` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1147,6 +1227,11 @@ impl<R: RawRwLockUpgrade, T: ?Sized> RwLock<R, T> {
     ///
     /// Returns an RAII guard which will release this thread's shared access
     /// once it is dropped.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn upgradable_read(&self) -> RwLockUpgradableReadGuard<'_, R, T> {
@@ -1162,6 +1247,11 @@ impl<R: RawRwLockUpgrade, T: ?Sized> RwLock<R, T> {
     /// when it is dropped.
     ///
     /// This function does not block.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_upgradable_read(&self) -> Option<RwLockUpgradableReadGuard<'_, R, T>> {
@@ -1197,6 +1287,11 @@ impl<R: RawRwLockUpgrade, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `upgradable_read` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1210,6 +1305,11 @@ impl<R: RawRwLockUpgrade, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_upgradable_read` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1233,6 +1333,11 @@ impl<R: RawRwLockUpgradeTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// See [`RawRwLockUpgradeTimed::try_lock_upgradable_for`] for timeout
     /// behavior.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_upgradable_read_for(
@@ -1256,6 +1361,11 @@ impl<R: RawRwLockUpgradeTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// See [`RawRwLockUpgradeTimed::try_lock_upgradable_until`] for timeout
     /// behavior.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[inline]
     #[track_caller]
     pub fn try_upgradable_read_until(
@@ -1274,6 +1384,11 @@ impl<R: RawRwLockUpgradeTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_upgradable_read_for` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1293,6 +1408,11 @@ impl<R: RawRwLockUpgradeTimed, T: ?Sized> RwLock<R, T> {
     ///
     /// This method is similar to the `try_upgradable_read_until` method; however, it requires the `RwLock` to be
     /// inside of an `Arc` and the resulting read guard has no lifetime requirements.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if the maximum number of readers supported by the
+    /// raw lock has been reached.
     #[cfg(feature = "arc_lock")]
     #[inline]
     #[track_caller]
@@ -1434,8 +1554,8 @@ impl<'a, R: RawRwLock + 'a, T: ?Sized + 'a> RwLockReadGuard<'a, R, T> {
 
     /// Temporarily unlocks the `RwLock` to execute the given function.
     ///
-    /// This is safe because `&mut` guarantees that there exist no other
-    /// references to the data protected by the `RwLock`.
+    /// The mutable reference ensures that no references derived from this guard
+    /// are live while the lock is temporarily released.
     #[inline]
     #[track_caller]
     pub fn unlocked<F, U>(s: &mut Self, f: F) -> U
@@ -1478,8 +1598,8 @@ impl<'a, R: RawRwLockFair + 'a, T: ?Sized + 'a> RwLockReadGuard<'a, R, T> {
     ///
     /// The `RwLock` is unlocked a fair unlock protocol.
     ///
-    /// This is safe because `&mut` guarantees that there exist no other
-    /// references to the data protected by the `RwLock`.
+    /// The mutable reference ensures that no references derived from this guard
+    /// are live while the lock is temporarily released.
     #[inline]
     #[track_caller]
     pub fn unlocked_fair<F, U>(s: &mut Self, f: F) -> U
@@ -1783,7 +1903,7 @@ impl<'a, R: RawRwLock + 'a, T: ?Sized + 'a> RwLockWriteGuard<'a, R, T> {
     where
         F: FnOnce() -> U,
     {
-        // Safety: An RwLockReadGuard always holds a shared lock.
+        // Safety: An RwLockWriteGuard always holds an exclusive lock.
         unsafe {
             s.rwlock.raw.unlock_exclusive();
         }
@@ -1974,7 +2094,7 @@ impl<R: RawRwLock, T: ?Sized> ArcRwLockWriteGuard<R, T> {
     where
         F: FnOnce() -> U,
     {
-        // Safety: An RwLockWriteGuard always holds a shared lock.
+        // Safety: An RwLockWriteGuard always holds an exclusive lock.
         unsafe {
             s.rwlock.raw.unlock_exclusive();
         }
@@ -2142,8 +2262,8 @@ impl<'a, R: RawRwLockUpgrade + 'a, T: ?Sized + 'a> RwLockUpgradableReadGuard<'a,
 
     /// Temporarily unlocks the `RwLock` to execute the given function.
     ///
-    /// This is safe because `&mut` guarantees that there exist no other
-    /// references to the data protected by the `RwLock`.
+    /// The mutable reference ensures that no references derived from this guard
+    /// are live while the lock is temporarily released.
     #[inline]
     #[track_caller]
     pub fn unlocked<F, U>(s: &mut Self, f: F) -> U
@@ -2220,8 +2340,8 @@ impl<'a, R: RawRwLockUpgradeFair + 'a, T: ?Sized + 'a> RwLockUpgradableReadGuard
     ///
     /// The `RwLock` is unlocked a fair unlock protocol.
     ///
-    /// This is safe because `&mut` guarantees that there exist no other
-    /// references to the data protected by the `RwLock`.
+    /// The mutable reference ensures that no references derived from this guard
+    /// are live while the lock is temporarily released.
     #[inline]
     #[track_caller]
     pub fn unlocked_fair<F, U>(s: &mut Self, f: F) -> U
@@ -2279,7 +2399,7 @@ impl<'a, R: RawRwLockUpgradeDowngrade + 'a, T: ?Sized + 'a> RwLockUpgradableRead
     /// Then, calls the provided closure with an exclusive reference to the lock's data.
     ///
     /// Finally, atomically downgrades the lock back to an upgradable read lock.
-    /// The closure's return value is wrapped in `Some` and returned.
+    /// The closure's return value is returned.
     ///
     /// This function only requires a mutable reference to the guard, unlike
     /// `upgrade` which takes the guard by value.
