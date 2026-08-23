@@ -1,23 +1,24 @@
-// Copyright 2016 Amanieu d'Antras
-//
-// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
-// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
-// http://opensource.org/licenses/MIT>, at your option. This file may not be
-// copied, modified, or distributed except according to those terms.
-
 use crate::mutex::{MutexGuard, RawMutex, RawMutexTimed};
 use core::{fmt, ops::DerefMut};
 
-/// Provides the inner implementation for a [`Condvar`] over a particular
-/// type of [`RawMutex`].
+/// Basic operations for a condition variable associated with a particular
+/// [`RawMutex`] implementation.
+///
+/// Types implementing this trait can be used by [`Condvar`] to form a safe
+/// condition variable type.
 ///
 /// # Safety
 ///
-/// Implementions must ensure that [`wait`] is safe to call, regardless of the
-/// specific [`RawMutex`] instance provided. If an implementation only supports
-/// one instance at a time, [`wait`] may panic.
+/// [`wait`](RawCondvar::wait) must atomically unlock the mutex and begin
+/// waiting with respect to calls to [`notify_one`](RawCondvar::notify_one) and
+/// [`notify_all`](RawCondvar::notify_all), then re-lock the mutex before it
+/// returns. A wait may return only after receiving a notification, or after a
+/// timeout for timed waits; spurious wakeups are not permitted.
 ///
-/// [`wait`]: RawCondvar::wait
+/// If a wait panics after unlocking the mutex, it must re-lock the mutex before
+/// unwinding. Implementations which cannot wait on distinct mutexes
+/// simultaneously may panic when asked to do so, but must not cause undefined
+/// behavior.
 pub unsafe trait RawCondvar {
     /// Initial value for a new condvar.
     // A “non-constant” const item is a legacy way to supply an initialized value to downstream
@@ -28,17 +29,14 @@ pub unsafe trait RawCondvar {
     /// The type of [`RawMutex`] this condvar can work with.
     type RawMutex: RawMutex;
 
-    /// Wait until the provided [`RawMutex`] is available.
+    /// Atomically unlocks the mutex and waits for a notification, then re-locks
+    /// the mutex before returning.
     ///
     /// # Safety
     ///
-    /// Caller must ensure the provided `mutex` is locked, and that they are the
-    /// owner of said lock for the duration of this call.
-    ///
-    /// # Panics
-    ///
-    /// Implementations are permitted to panic if requested to wait on two distinct
-    /// [`RawMutex`]s simultaneously.
+    /// The caller must logically hold `mutex`. The protected data must not be
+    /// accessed from the time this method unlocks the mutex until it re-locks
+    /// it.
     unsafe fn wait(&self, mutex: &Self::RawMutex);
 
     /// Notify a single waiting thread.
@@ -48,57 +46,55 @@ pub unsafe trait RawCondvar {
     fn notify_all(&self) -> usize;
 }
 
-/// Additional methods for [`RawCondvar`] which support timeouts.
+/// Additional methods for condition variables which support timeouts.
 ///
 /// # Safety
 ///
-/// Implementions must ensure that [`wait_for`] and [`wait_until`] are safe to call,
-/// regardless of the specific [`RawMutex`] instance provided. If an implementation
-/// only supports one instance at a time, waiting may panic.
-///
-/// [`wait_for`]: RawCondvar::wait_for
-/// [`wait_until`]: RawCondvar::wait_until
+/// Implementations must uphold the safety requirements of [`RawCondvar`] for
+/// the additional methods provided by this trait.
 pub unsafe trait RawCondvarTimed: RawCondvar
 where
     Self::RawMutex: RawMutexTimed,
 {
-    /// Attmped to convert the provided [`Duration`](RawMutexTimed::Duration) into
-    /// an [`Instant`](RawMutexTimed::Instant). Returns [`None`] if the provided
-    /// duration is further into the future than can be represented by an instant.
+    /// Converts a relative timeout into an absolute timeout.
+    ///
+    /// Returns `None` if the resulting instant cannot be represented.
     fn checked_duration_to_instant(
         timeout: &<Self::RawMutex as RawMutexTimed>::Duration,
     ) -> Option<<Self::RawMutex as RawMutexTimed>::Instant>;
 
-    /// Wait until the provided [`RawMutex`] is available until the provided
-    /// timeout is reached.
+    /// Atomically unlocks the mutex and waits for a notification or until the
+    /// timeout is reached, then re-locks the mutex before returning.
+    ///
+    /// Returns `true` if the wait timed out and `false` if it received a
+    /// notification.
+    ///
+    /// A timed-out wait must not return before `timeout`, but may return later
+    /// due to scheduling or platform-specific behavior.
     ///
     /// # Safety
     ///
-    /// Caller must ensure the provided `mutex` is locked, and that they are the
-    /// owner of said lock for the duration of this call.
-    ///
-    /// # Panics
-    ///
-    /// Implementations are permitted to panic if requested to wait on two distinct
-    /// [`RawMutex`]s simultaneously.
+    /// The caller must uphold the safety requirements of
+    /// [`RawCondvar::wait`].
     unsafe fn wait_until(
         &self,
         mutex: &Self::RawMutex,
         timeout: &<Self::RawMutex as RawMutexTimed>::Instant,
     ) -> bool;
 
-    /// Wait until the provided [`RawMutex`] is available until the provided
-    /// timeout is reached.
+    /// Atomically unlocks the mutex and waits for a notification or until the
+    /// timeout is reached, then re-locks the mutex before returning.
+    ///
+    /// Returns `true` if the wait timed out and `false` if it received a
+    /// notification.
+    ///
+    /// A timed-out wait must not return before `timeout` has elapsed, but may
+    /// return later due to scheduling or platform-specific behavior.
     ///
     /// # Safety
     ///
-    /// Caller must ensure the provided `mutex` is locked, and that they are the
-    /// owner of said lock for the duration of this call.
-    ///
-    /// # Panics
-    ///
-    /// Implementations are permitted to panic if requested to wait on two distinct
-    /// [`RawMutex`]s simultaneously.
+    /// The caller must uphold the safety requirements of
+    /// [`RawCondvar::wait`].
     unsafe fn wait_for(
         &self,
         mutex: &Self::RawMutex,
@@ -110,9 +106,9 @@ where
             match Self::checked_duration_to_instant(timeout) {
                 Some(timeout) => self.wait_until(mutex, &timeout),
                 None => {
-                    // If the timeout could not be computed, we know the result  must
-                    // be `false`, indicating we did not timeout.
-                    <Self as RawCondvar>::wait(&self, mutex);
+                    // An unrepresentable timeout is treated as having no
+                    // deadline.
+                    <Self as RawCondvar>::wait(self, mutex);
                     false
                 }
             }
@@ -120,20 +116,19 @@ where
     }
 }
 
-/// A type indicating whether a timed wait on a condition variable returned
-/// due to a time out or not.
+/// A type indicating whether a timed wait on a condition variable timed out.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct WaitTimeoutResult(bool);
 
 impl WaitTimeoutResult {
-    /// Returns whether the wait was known to have timed out.
+    /// Returns `true` if the wait was known to have timed out.
     #[inline]
-    pub fn timed_out(self) -> bool {
+    pub const fn timed_out(self) -> bool {
         self.0
     }
 }
 
-/// A Condition Variable
+/// A condition variable.
 ///
 /// Condition variables represent the ability to block a thread such that it
 /// consumes no CPU time while waiting for an event to occur. Condition
@@ -147,6 +142,16 @@ pub struct Condvar<C> {
 impl<C: RawCondvar> Condvar<C> {
     /// Creates a new condition variable which is ready to be waited on and
     /// notified.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lock_api::{Condvar, RawCondvar};
+    ///
+    /// # fn example<C: RawCondvar>() {
+    /// let condvar = Condvar::<C>::new();
+    /// # }
+    /// ```
     #[inline]
     pub const fn new() -> Condvar<C> {
         Condvar { inner: C::INIT }
@@ -166,9 +171,27 @@ impl<C: RawCondvar> Condvar<C> {
     /// Returns whether a thread was woken up.
     ///
     /// If there is a blocked thread on this condition variable, then it will
-    /// be woken up from its call to `wait` or `wait_timeout`.
+    /// be woken up from its call to [`wait`](Self::wait),
+    /// [`wait_for`](Self::wait_for), or [`wait_until`](Self::wait_until).
+    /// Calls to `notify_one` are not buffered in any way.
     ///
-    /// To wake up all threads, see `notify_all()`.
+    /// To wake up all threads, see [`notify_all`](Self::notify_all).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lock_api::{Condvar, RawCondvar};
+    ///
+    /// # fn example<C: RawCondvar + Send + Sync + 'static>() {
+    /// let condvar = Condvar::<C>::new();
+    ///
+    /// // Do something with condvar, share it with other threads.
+    ///
+    /// if !condvar.notify_one() {
+    ///     println!("Nobody was listening for this.");
+    /// }
+    /// # }
+    /// ```
     #[inline]
     pub fn notify_one(&self) -> bool {
         self.inner.notify_one()
@@ -179,9 +202,9 @@ impl<C: RawCondvar> Condvar<C> {
     /// Returns the number of threads woken up.
     ///
     /// This method will ensure that any current waiters on the condition
-    /// variable are awoken.
+    /// variable are awoken. Calls to `notify_all` are not buffered in any way.
     ///
-    /// To wake up only one thread, see `notify_one()`.
+    /// To wake up only one thread, see [`notify_one`](Self::notify_one).
     #[inline]
     pub fn notify_all(&self) -> usize {
         self.inner.notify_all()
@@ -190,16 +213,20 @@ impl<C: RawCondvar> Condvar<C> {
     /// Blocks the current thread until this condition variable receives a
     /// notification.
     ///
-    /// This function will unlock the mutex specified (represented by
-    /// `mutex_guard`) and block the current thread. This means that any calls
-    /// to `notify_*()` which happen logically after the mutex is unlocked are
-    /// candidates to wake this thread up. When this function call returns, the
-    /// lock specified will have been re-acquired.
+    /// This function will atomically unlock the mutex specified (represented by
+    /// `mutex_guard`) and block the current thread. This means that calls to
+    /// [`notify_one`](Self::notify_one) or [`notify_all`](Self::notify_all)
+    /// which happen logically after the mutex is unlocked are candidates to
+    /// wake this thread. When this function returns, the lock will have been
+    /// re-acquired.
+    ///
+    /// This condition variable does not spuriously wake: in the absence of a
+    /// notification this function will continue waiting.
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait<T: ?Sized>(&self, mutex_guard: &mut MutexGuard<'_, C::RawMutex, T>) {
         unsafe {
@@ -207,13 +234,13 @@ impl<C: RawCondvar> Condvar<C> {
         }
     }
 
-    /// Blocks the current thread until this condition variable receives a
-    /// notification. If the provided condition evaluates to `false`, then the
-    /// thread is no longer blocked and the operation is completed. If the
-    /// condition evaluates to `true`, then the thread is blocked again and
-    /// waits for another notification before repeating this process.
+    /// Blocks the current thread until the provided condition becomes false.
     ///
-    /// This function will unlock the mutex specified (represented by
+    /// `condition` is checked immediately. If it returns `true`, this function
+    /// waits for the next notification and checks the condition again. This
+    /// repeats until `condition` returns `false`.
+    ///
+    /// This function will atomically unlock the mutex specified (represented by
     /// `mutex_guard`) and block the current thread. This means that any calls
     /// to `notify_*()` which happen logically after the mutex is unlocked are
     /// candidates to wake this thread up. When this function call returns, the
@@ -221,8 +248,8 @@ impl<C: RawCondvar> Condvar<C> {
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait_while<T, F>(
         &self,
@@ -244,11 +271,11 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// Waits on this condition variable for a notification, timing out after
     /// the specified time instant.
     ///
-    /// The semantics of this function are equivalent to `wait()` except that
-    /// the thread will be blocked roughly until `timeout` is reached. This
-    /// method should not be used for precise timing due to anomalies such as
-    /// preemption or platform differences that may not cause the maximum
-    /// amount of time waited to be precisely `timeout`.
+    /// The semantics of this function are equivalent to [`wait`](Self::wait),
+    /// except that it stops waiting after `timeout` is reached. A notification
+    /// may make the function return earlier. If the operation times out, it
+    /// will not return before `timeout`, but it may return later because of
+    /// scheduling or platform-specific behavior.
     ///
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
@@ -257,16 +284,16 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// A timeout which cannot be represented by the underlying clock is
     /// treated as having no deadline.
     ///
-    /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed without the condition being met.
+    /// The returned [`WaitTimeoutResult`] indicates whether the wait ended
+    /// because the timeout elapsed rather than because of a notification.
     ///
-    /// Like `wait`, the lock specified will be re-acquired when this function
-    /// returns, regardless of whether the timeout elapsed or not.
+    /// Like [`wait`](Self::wait), the lock will be re-acquired before this
+    /// function returns, regardless of whether the timeout elapsed.
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait_until<T: ?Sized>(
         &self,
@@ -282,11 +309,11 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// Waits on this condition variable for a notification, timing out after a
     /// specified duration.
     ///
-    /// The semantics of this function are equivalent to `wait()` except that
-    /// the thread will be blocked for roughly no longer than `timeout`. This
-    /// method should not be used for precise timing due to anomalies such as
-    /// preemption or platform differences that may not cause the maximum
-    /// amount of time waited to be precisely `timeout`.
+    /// The semantics of this function are equivalent to [`wait`](Self::wait),
+    /// except that it stops waiting after the specified duration. A
+    /// notification may make the function return earlier. If the operation
+    /// times out, it will not return before `timeout` has elapsed, but it may
+    /// return later because of scheduling or platform-specific behavior.
     ///
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
@@ -295,16 +322,16 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// A timeout which cannot be represented by the underlying clock is
     /// treated as having no deadline.
     ///
-    /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed.
+    /// The returned [`WaitTimeoutResult`] indicates whether the wait ended
+    /// because the timeout elapsed rather than because of a notification.
     ///
-    /// Like `wait`, the lock specified will be re-acquired when this function
-    /// returns, regardless of whether the timeout elapsed or not.
+    /// Like [`wait`](Self::wait), the lock will be re-acquired before this
+    /// function returns, regardless of whether the timeout elapsed.
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait_for<T: ?Sized>(
         &self,
@@ -317,18 +344,14 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
         })
     }
 
-    /// Waits on this condition variable for a notification, timing out after
-    /// the specified time instant. If the provided condition evaluates to
-    /// `false`, then the thread is no longer blocked and the operation is
-    /// completed. If the condition evaluates to `true`, then the thread is
-    /// blocked again and waits for another notification before repeating
-    /// this process.
+    /// Waits on this condition variable for the provided condition to become
+    /// false, timing out after the specified time instant.
     ///
-    /// The semantics of this function are equivalent to `wait()` except that
-    /// the thread will be blocked roughly until `timeout` is reached. This
-    /// method should not be used for precise timing due to anomalies such as
-    /// preemption or platform differences that may not cause the maximum
-    /// amount of time waited to be precisely `timeout`.
+    /// The semantics of this function are equivalent to
+    /// [`wait_while`](Self::wait_while), except that it stops waiting after
+    /// `timeout` is reached. If the operation times out, it will not return
+    /// before `timeout`, but it may return later because of scheduling or
+    /// platform-specific behavior.
     ///
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
@@ -337,16 +360,16 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// A timeout which cannot be represented by the underlying clock is
     /// treated as having no deadline.
     ///
-    /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed.
+    /// The returned [`WaitTimeoutResult`] indicates whether the wait timed out
+    /// while the condition remained `true`.
     ///
-    /// Like `wait`, the lock specified will be re-acquired when this function
-    /// returns, regardless of whether the timeout elapsed or not.
+    /// Like [`wait_while`](Self::wait_while), the lock will be re-acquired
+    /// before this function returns, regardless of whether the timeout elapsed.
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait_while_until<T, F>(
         &self,
@@ -374,17 +397,14 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
         }
     }
 
-    /// Waits on this condition variable for a notification, timing out after a
-    /// specified duration. If the provided condition evaluates to `false`,
-    /// then the thread is no longer blocked and the operation is completed.
-    /// If the condition evaluates to `true`, then the thread is blocked again
-    /// and waits for another notification before repeating this process.
+    /// Waits on this condition variable for the provided condition to become
+    /// false, timing out after a specified duration.
     ///
-    /// The semantics of this function are equivalent to `wait()` except that
-    /// the thread will be blocked for roughly no longer than `timeout`. This
-    /// method should not be used for precise timing due to anomalies such as
-    /// preemption or platform differences that may not cause the maximum
-    /// amount of time waited to be precisely `timeout`.
+    /// The semantics of this function are equivalent to
+    /// [`wait_while`](Self::wait_while), except that it stops waiting after the
+    /// specified duration. If the operation times out, it will not return
+    /// before `timeout` has elapsed, but it may return later because of
+    /// scheduling or platform-specific behavior.
     ///
     /// Note that the best effort is made to ensure that the time waited is
     /// measured with a monotonic clock, and not affected by the changes made to
@@ -393,16 +413,16 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
     /// A timeout which cannot be represented by the underlying clock is
     /// treated as having no deadline.
     ///
-    /// The returned `WaitTimeoutResult` value indicates if the timeout is
-    /// known to have elapsed without the condition being met.
+    /// The returned [`WaitTimeoutResult`] indicates whether the wait timed out
+    /// while the condition remained `true`.
     ///
-    /// Like `wait`, the lock specified will be re-acquired when this function
-    /// returns, regardless of whether the timeout elapsed or not.
+    /// Like [`wait_while`](Self::wait_while), the lock will be re-acquired
+    /// before this function returns, regardless of whether the timeout elapsed.
     ///
     /// # Panics
     ///
-    /// The underlying [`RawCondvar`] implementation provided by `C` is permitted
-    /// to panic if requested to wait on two distinct [`MutexGuard`]s simultaneously.
+    /// The underlying [`RawCondvar`] implementation may panic if another thread
+    /// is waiting on this condition variable with a different mutex.
     #[inline]
     pub fn wait_while_for<T: ?Sized, F>(
         &self,
@@ -416,8 +436,7 @@ impl<R: RawMutexTimed, C: RawCondvarTimed<RawMutex = R>> Condvar<C> {
         match C::checked_duration_to_instant(&timeout) {
             Some(timeout) => self.wait_while_until(mutex_guard, condition, timeout),
             None => {
-                // If the timeout could not be computed, we know the `WaitTimeoutResult`
-                // must be `false`, indicating we did not timeout.
+                // An unrepresentable timeout is treated as having no deadline.
                 self.wait_while(mutex_guard, condition);
                 WaitTimeoutResult(false)
             }

@@ -1,6 +1,6 @@
 use crate::raw_mutex::RawMutex;
 
-/// A mutual exclusion primitive useful for protecting shared data
+/// A mutual exclusion primitive useful for protecting shared data.
 ///
 /// This mutex will block threads waiting for the lock to become available. The
 /// mutex can be statically initialized or created by the `new`
@@ -19,12 +19,9 @@ use crate::raw_mutex::RawMutex;
 ///
 /// This mutex uses [eventual fairness](https://trac.webkit.org/changeset/203350)
 /// to ensure that the lock will be fair on average without sacrificing
-/// throughput. This is done by forcing a fair unlock on average every 0.5ms,
-/// which will force the lock to go to the next thread waiting for the mutex.
-///
-/// Additionally, any critical section longer than 1ms will always use a fair
-/// unlock, which has a negligible impact on throughput considering the length
-/// of the critical section.
+/// throughput. Fair unlocks are forced periodically, with intervals averaging
+/// 0.5ms per parking-lot hash bucket. A fair unlock hands the mutex to a
+/// waiting thread instead of allowing a newly arriving thread to acquire it.
 ///
 /// You can also force a fair unlock by calling `MutexGuard::unlock_fair` when
 /// unlocking a mutex instead of simply dropping the `MutexGuard`.
@@ -32,10 +29,8 @@ use crate::raw_mutex::RawMutex;
 /// # Differences from the standard library `Mutex`
 ///
 /// - No poisoning, the lock is released normally on panic.
-/// - Can be statically constructed.
-/// - Does not require any drop glue when dropped.
-/// - Inline fast path for the uncontended case.
-/// - Efficient handling of micro-contention using adaptive spinning.
+/// - Only requires 1 byte of lock state.
+/// - Supports locking with a timeout.
 /// - Allows raw locking & unlocking without a guard.
 /// - Supports eventual fairness so that the mutex is fair on average.
 /// - Optionally allows making the mutex fair by calling `MutexGuard::unlock_fair`.
@@ -76,21 +71,14 @@ use crate::raw_mutex::RawMutex;
 /// ```
 pub type Mutex<T> = lock_api::Mutex<RawMutex, T>;
 
-/// Creates a new mutex in an unlocked state ready for use.
-///
-/// This allows creating a mutex in a constant context on stable Rust.
-pub const fn const_mutex<T>(val: T) -> Mutex<T> {
-    Mutex::const_new(<RawMutex as lock_api::RawMutex>::INIT, val)
-}
-
-/// An RAII implementation of a "scoped lock" of a mutex. When this structure is
-/// dropped (falls out of scope), the lock will be unlocked.
+/// An RAII guard which unlocks the mutex when dropped.
 ///
 /// The data protected by the mutex can be accessed through this guard via its
-/// `Deref` and `DerefMut` implementations.
+/// [`Deref`](core::ops::Deref) and [`DerefMut`](core::ops::DerefMut)
+/// implementations.
 pub type MutexGuard<'a, T> = lock_api::MutexGuard<'a, RawMutex, T>;
 
-/// An RAII mutex guard returned by `MutexGuard::map`, which can point to a
+/// An RAII mutex guard returned by [`MutexGuard::map`], which can point to a
 /// subfield of the protected data.
 ///
 /// The main difference between `MappedMutexGuard` and `MutexGuard` is that the

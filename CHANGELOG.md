@@ -12,11 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APIs.
 - Removed the `hardware-lock-elision` feature.
 - Removed the no-op `lock_api/nightly` feature.
+- Removed the legacy `lock_api` `const_new` methods and the redundant
+  `parking_lot` `const_*` constructor functions; the corresponding `new`
+  methods can be called in constant contexts.
 - Replaced the recursive read methods on `RwLock` with a dedicated reader-biased
   `RecursiveRwLock` type. The `RawRwLockRecursive` and `RawRwLockRecursiveTimed`
   extension traits have been removed from `lock_api`.
 - Added `Once::new_completed` for constructing a `Once` in the completed state.
+- Added `Once::{is_completed, wait, wait_force}` and the corresponding
+  `OnceState` query methods.
+- Made additional lock, timeout, parking, and spin-wait accessors usable in
+  constant contexts.
 - Added `into_inner_with_raw` to `lock_api`'s `Mutex`, `RwLock`, and `ReentrantMutex`.
+- Added `RawCondvar`, `RawCondvarTimed`, and the generic `Condvar` wrapper to
+  `lock_api`, and implemented `parking_lot::Condvar` using them.
 - Corrected the `Send` and `Sync` bounds of lock guards in `lock_api`.
 - Made `RawMutex::is_locked` and `RawRwLock::{is_locked, is_locked_exclusive}` required methods.
 - Renamed `MappedRwLockReadGuard::try_map_or_else` to `try_map_or_err`.
