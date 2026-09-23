@@ -111,7 +111,7 @@ impl ThreadParker {
         let r = unsafe {
             libc::syscall(
                 libc::SYS_futex,
-                &self.futex,
+                self.futex.as_ptr(),
                 libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
                 1,
                 ts_ptr,
