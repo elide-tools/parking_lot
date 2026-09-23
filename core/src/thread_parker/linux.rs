@@ -139,7 +139,7 @@ impl super::UnparkHandleT for UnparkHandle {
         // matter since the syscall will just return EFAULT in that case.
         let r = libc::syscall(
             libc::SYS_futex,
-            self.futex,
+            self.futex.cast::<i32>().cast_mut(),
             libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG,
             1,
         );
